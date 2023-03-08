@@ -26,14 +26,14 @@ export class ObjktsService {
   }
 
   getData(): Observable<any> {
-    return this.getLatestObjkt().pipe(
+    return this.getLatestBoughtObjktsTokenPk().pipe(
       map((latestObjkt) => {
         return latestObjkt;
       }),
     );
   }
 
-  getLatestObjkt(): Observable<AxiosResponse<any>> {
+  getLatestBoughtObjktsTokenPk(): Observable<AxiosResponse<number[]>> {
     const query = `
       query MyQuery($limit: Int!, $order_by: [event_order_by!], $where: event_bool_exp!) {
       event(
@@ -41,11 +41,7 @@ export class ObjktsService {
         limit: $limit
         where: $where
         ) {
-        creator_address
-        fa_contract
-        token {
-          token_id
-        }
+        token_pk
       }
     }`;
 
@@ -66,7 +62,9 @@ export class ObjktsService {
             console.log(response.data.errors);
           }
 
-          return response.data.data.event;
+          return response.data.data.event.map((i) => {
+            return i.token_pk;
+          });
         }),
       );
   }
@@ -105,10 +103,7 @@ export class ObjktsService {
       where: {
         timestamp: { _is_null: false },
         reverted: { _neq: true },
-        token: {
-          token_id: { _eq: tokenId },
-        },
-        fa_contract: { _eq: contract },
+        token_pk: { _eq: tokenId },
       },
       order_by: [
         { id: SortDirection.ASCENDING },
