@@ -7,7 +7,7 @@ export class ObjktsController {
   constructor(private readonly objktsService: ObjktsService) {}
 
   @Get('get')
-  getData(): Observable<any> {
+  getData(): Promise<any> {
     return this.objktsService.getData();
   }
 }

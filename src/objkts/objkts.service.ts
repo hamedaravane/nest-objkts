@@ -1,39 +1,42 @@
-import { Injectable } from '@nestjs/common';
-import { HttpService } from '@nestjs/axios';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Objkt } from './entities/objkt.entity';
-import { Repository } from 'typeorm';
-import { concatMap, forkJoin, map, mergeMap, Observable, tap } from 'rxjs';
-import { AxiosResponse } from 'axios';
-import { MarketplaceEventType, SortDirection } from './models/objkt.model';
+import { Injectable } from "@nestjs/common";
+import { HttpService } from "@nestjs/axios";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Objkt } from "./entities/objkt.entity";
+import { Repository } from "typeorm";
+import { firstValueFrom, map } from "rxjs";
+import { EventType, MarketplaceEventType, SortDirection } from "./models/objkt.model";
 
 @Injectable()
 export class ObjktsService {
-  private readonly url: string = 'https://data.objkt.com/v3/graphql';
+  private readonly url: string = "https://data.objkt.com/v3/graphql";
   private readonly headers: Record<string, string> = {
-    'content-type': 'application/json',
-    'Accept-Encoding': '*',
+    "content-type": "application/json",
+    "Accept-Encoding": "*"
   };
 
   constructor(
     @InjectRepository(Objkt)
     private objktRepository: Repository<Objkt>,
-    private readonly httpService: HttpService,
-  ) {}
+    private readonly httpService: HttpService
+  ) {
+  }
 
   async saveObjkt() {
     await this.objktRepository.save({});
   }
 
-  getData(): Observable<any> {
-    return this.getLatestBoughtObjktsTokenPk().pipe(
-      map((latestObjkt) => {
-        return latestObjkt;
-      }),
-    );
+  async getData() {
+    const tokens = await this.getTokens();
+    const details = [];
+
+    for (const token of tokens) {
+      details.push(await this.getTokenEvents(token));
+    }
+
+    return details;
   }
 
-  getLatestBoughtObjktsTokenPk(): Observable<AxiosResponse<number[]>> {
+  async getTokens(): Promise<number[]> {
     const query = `
       query MyQuery($limit: Int!, $order_by: [event_order_by!], $where: event_bool_exp!) {
       event(
@@ -49,30 +52,26 @@ export class ObjktsService {
       limit: 3,
       order_by: [
         { id: SortDirection.DESCENDING },
-        { timestamp: SortDirection.DESCENDING },
+        { timestamp: SortDirection.DESCENDING }
       ],
-      where: { marketplace_event_type: { _eq: MarketplaceEventType.LIST_BUY } },
+      where: { marketplace_event_type: { _eq: MarketplaceEventType.LIST_BUY } }
     };
 
-    return this.httpService
-      .post(this.url, { query, variables }, { headers: this.headers })
-      .pipe(
-        map((response) => {
-          if (response.data.errors) {
-            console.log(response.data.errors);
-          }
-
-          return response.data.data.event.map((i) => {
-            return i.token_pk;
-          });
-        }),
-      );
+    return await firstValueFrom(
+      this.httpService
+        .post(this.url, { query, variables }, { headers: this.headers })
+        .pipe(
+          map((response) => {
+            if (response.data.errors) {
+              console.log(response.data.errors);
+            }
+            return response.data.data.event.map(item => item.token_pk);
+          })
+        )
+    );
   }
 
-  getObjktDetails(
-    contract: string,
-    tokenId: string,
-  ): Observable<AxiosResponse<any>> {
+  async getTokenEvents(tokenPk: number): Promise<any> {
     const query = `
           query getEvents($where: event_bool_exp!, $order_by: [event_order_by!]) {
             event(
@@ -103,33 +102,34 @@ export class ObjktsService {
       where: {
         timestamp: { _is_null: false },
         reverted: { _neq: true },
-        token_pk: { _eq: tokenId },
+        token_pk: { _eq: tokenPk }
       },
       order_by: [
         { id: SortDirection.ASCENDING },
-        { timestamp: SortDirection.ASCENDING },
-      ],
+        { timestamp: SortDirection.ASCENDING }
+      ]
     };
 
-    return this.httpService
-      .post(this.url, { query, variables }, { headers: this.headers })
-      .pipe(
-        map((response) => {
-          if (response.data.errors) {
-            console.log(response.data.errors);
-          }
-
-          return response.data.data.event;
-        }),
-      );
+    return await firstValueFrom(
+      this.httpService
+        .post(this.url, { query, variables }, { headers: this.headers })
+        .pipe(
+          map((response) => {
+            if (response.data.errors) {
+              console.log(response.data.errors);
+            }
+            return response.data.data.event;
+          })
+        )
+    );
   }
 
   checkIfIBought(list): boolean {
     for (const listElement of list) {
       if (
         listElement.recipient_address ===
-          'tz1ibW4sjBmVJEuCnaBzqRcvrU5mzNJfd9Ni' &&
-        listElement.event_type === 'transfer'
+        "tz1ibW4sjBmVJEuCnaBzqRcvrU5mzNJfd9Ni" &&
+        listElement.event_type === EventType.TRANSFER
       ) {
         return false;
       }
@@ -165,7 +165,7 @@ export class ObjktsService {
         historyElement.marketplace_event_type === MarketplaceEventType.LIST_BUY
       ) {
         const date = Math.round(
-          new Date(historyElement.timestamp).getTime() / 1000 / 60,
+          new Date(historyElement.timestamp).getTime() / 1000 / 30
         );
         purchaseTimestamps.push(date);
       }
@@ -193,13 +193,13 @@ export class ObjktsService {
     const artist = this.findArtist(history);
     for (const historyElement of history) {
       if (
-        historyElement.marketplace_event_type === 'list' &&
+        historyElement.marketplace_event_type === MarketplaceEventType.LIST_CREATE &&
         artist === historyElement.creator_address
       ) {
         amountOfList += historyElement.amount;
       }
       if (
-        historyElement.marketplace_event_type === 'cancel_list' &&
+        historyElement.marketplace_event_type === MarketplaceEventType.LIST_CANCEL &&
         artist === historyElement.creator_address
       ) {
         amountOfList -= historyElement.amount;
@@ -224,8 +224,7 @@ export class ObjktsService {
     let iterator = 0;
     for (const historyElement of history) {
       if (
-        historyElement.event_type === 'transfer' &&
-        historyElement.marketplace_event_type === 'transfer'
+        historyElement.event_type === EventType.TRANSFER
       ) {
         if (historyElement.creator_address === this.findArtist(history)) {
           iterator++;
@@ -236,9 +235,9 @@ export class ObjktsService {
   }
 
   findArtist(history): string {
-    let artist = '';
+    let artist = "";
     for (const historyElement of history) {
-      if (historyElement.marketplace_event_type === 'list') {
+      if (historyElement.marketplace_event_type === MarketplaceEventType.LIST_CREATE) {
         artist = historyElement.creator_address;
         return artist;
       }
