@@ -20,6 +20,7 @@ import { Objkt } from './objkts/entities/objkt.entity';
     ObjktsModule,
     HttpModule,
   ],
+  providers: [],
 })
 export class AppModule {
   constructor(private dataSource: DataSource) {}

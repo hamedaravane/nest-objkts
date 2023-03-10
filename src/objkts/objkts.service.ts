@@ -1,22 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Objkt } from './entities/objkt.entity';
 import { Repository } from 'typeorm';
-import { firstValueFrom, map } from 'rxjs';
-import {
-  EventType,
-  MarketplaceEventType,
-  SortDirection,
-} from './models/objkt.model';
+import { EventType, MarketplaceEventType } from './models/objkt.model';
+import { ObjktsApiService } from './objkts-api.service';
 
 @Injectable()
 export class ObjktsService {
-  private readonly url: string = 'https://data.objkt.com/v3/graphql';
-  private readonly headers: Record<string, string> = {
-    'content-type': 'application/json',
-    'Accept-Encoding': '*',
-  };
   private readonly minimumListToken = 1;
   private readonly maximumListToken = 100;
   private readonly minimumSoldToken = 2;
@@ -24,7 +14,7 @@ export class ObjktsService {
   constructor(
     @InjectRepository(Objkt)
     private objktRepository: Repository<Objkt>,
-    private readonly httpService: HttpService,
+    private objktApiService: ObjktsApiService,
   ) {}
 
   async saveObjkt() {
@@ -32,103 +22,28 @@ export class ObjktsService {
   }
 
   async getData() {
-    const tokens = await this.getTokens();
-    const details = [];
+    const tokens = await this.objktApiService.getTokens();
+    const tokensArray = [];
+    let tokenDetail = {};
 
     for (const token of tokens) {
-      const tokenEvents = await this.getTokenEvents(token);
-      details.push(this.collectRate(tokenEvents));
-    }
-
-    return details;
-  }
-
-  async getTokens(): Promise<number[]> {
-    const query = `
-      query GetTokens($limit: Int!, $order_by: [event_order_by!], $where: event_bool_exp!) {
-      event(
-        order_by: $order_by
-        limit: $limit
-        where: $where
-        ) {
-        token_pk
+      const tokenEvents = await this.objktApiService.getTokenEvents(token);
+      if (this.checkIfIBought(tokenEvents)) {
+        if (this.checkAvailability(tokenEvents)) {
+          tokenDetail = {
+            creator_address: this.findArtist(tokenEvents),
+            price: this.getPrice(tokenEvents),
+            royalty: this.calculateRoyalty(tokenEvents),
+            editions: this.amountOfListEdition(tokenEvents),
+            sold_editions: this.amountOfPurchases(tokenEvents),
+            sold_rate: this.soldRate(tokenEvents),
+            average_collect_actions: this.averagePurchaseActionsTime(tokenEvents),
+          };
+          tokensArray.push(tokenDetail);
+        }
       }
-    }`;
-
-    const variables = {
-      limit: 30,
-      order_by: [
-        { id: SortDirection.DESCENDING },
-        { timestamp: SortDirection.DESCENDING },
-      ],
-      where: { marketplace_event_type: { _eq: MarketplaceEventType.LIST_BUY } },
-    };
-
-    return await firstValueFrom(
-      this.httpService
-        .post(this.url, { query, variables }, { headers: this.headers })
-        .pipe(
-          map((response) => {
-            if (response.data.errors) {
-              console.log(response.data.errors);
-            }
-            return response.data.data.event.map((item) => item.token_pk);
-          }),
-        ),
-    );
-  }
-
-  async getTokenEvents(tokenPk: number): Promise<any> {
-    const query = `
-          query GetTokenEvents($where: event_bool_exp!, $order_by: [event_order_by!]) {
-            event(
-              where: $where
-              order_by: $order_by
-            ) {
-            event_type
-            creator_address
-            marketplace_event_type
-            amount
-            fa_contract
-            id
-            price
-            recipient_address
-            timestamp
-            token {
-              name
-              token_id
-              royalties {
-                amount
-                decimals
-              }
-            }
-          }
-        }`;
-
-    const variables = {
-      where: {
-        timestamp: { _is_null: false },
-        reverted: { _neq: true },
-        token_pk: { _eq: tokenPk },
-      },
-      order_by: [
-        { id: SortDirection.ASCENDING },
-        { timestamp: SortDirection.ASCENDING },
-      ],
-    };
-
-    return await firstValueFrom(
-      this.httpService
-        .post(this.url, { query, variables }, { headers: this.headers })
-        .pipe(
-          map((response) => {
-            if (response.data.errors) {
-              console.log(response.data.errors);
-            }
-            return response.data.data.event;
-          }),
-        ),
-    );
+    }
+    return tokensArray;
   }
 
   /**
@@ -293,7 +208,7 @@ export class ObjktsService {
    * @param events - An array of token events.
    * @returns {number} The average time (in seconds) between purchases.
    */
-  collectRate(events) {
+  averagePurchaseActionsTime(events): number {
     const purchaseTimestamps = this.getListOfPurchaseTimestamps(events);
     const differences = purchaseTimestamps
       .slice(1)
