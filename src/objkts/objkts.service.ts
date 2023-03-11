@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Objkt } from './entities/objkt.entity';
 import { Repository } from 'typeorm';
-import { EventType, MarketplaceEventType } from './models/objkt.model';
+import { EventType, MarketplaceEventType, Event, Royalty, Creator } from "./models/token.model";
 import { ObjktsApiService } from './objkts-api.service';
 
 @Injectable()
@@ -27,15 +27,16 @@ export class ObjktsService {
     let tokenDetail = {};
 
     for (const token of tokens) {
-      const tokenEvents = await this.objktApiService.getTokenEvents(token);
+      const tokenEvents: Event[] = await this.objktApiService.getTokenEvents(token);
       if (this.checkIfIBought(tokenEvents)) {
         if (this.checkAvailability(tokenEvents)) {
           tokenDetail = {
-            creator_address: this.findArtist(tokenEvents),
+            ...this.findArtist(tokenEvents),
             price: this.getPrice(tokenEvents),
             royalty: this.calculateRoyalty(tokenEvents),
             editions: this.amountOfListEdition(tokenEvents),
             sold_editions: this.amountOfPurchases(tokenEvents),
+            token_pk: token,
             sold_rate: this.soldRate(tokenEvents),
             average_collect_actions: this.averagePurchaseActionsTime(tokenEvents),
           };
@@ -51,7 +52,7 @@ export class ObjktsService {
    * @param events - An array of token events.
    * @returns {boolean} The final result which is true if I already bought this token.
    */
-  checkIfIBought(events): boolean {
+  checkIfIBought(events: Event[]): boolean {
     for (const event of events) {
       if (
         event.recipient_address === 'tz1ibW4sjBmVJEuCnaBzqRcvrU5mzNJfd9Ni' &&
@@ -68,7 +69,7 @@ export class ObjktsService {
    * @param events - An array of token events.
    * @returns {number} The Price.
    */
-  getPrice(events): number {
+  getPrice(events: Event[]): number {
     for (const event of events) {
       if (event.marketplace_event_type === MarketplaceEventType.LIST_BUY) {
         return event.price / 1000000;
@@ -81,10 +82,10 @@ export class ObjktsService {
    * @param events - An array of token events.
    * @returns {number} The royalty percentage.
    */
-  calculateRoyalty(events): number {
+  calculateRoyalty(events: Event[]): number {
     let amount = 0;
     let decimal = 0;
-    const royalties = events[0].token.royalties;
+    const royalties: Royalty[] = events[0].token.royalties;
     for (const royalty of royalties) {
       amount += royalty.amount;
       decimal = royalty.decimals;
@@ -98,7 +99,7 @@ export class ObjktsService {
    * @param events - An array of token events.
    * @returns {number[]} An array of timestamps (in seconds) for every buy action in the events list.
    */
-  getListOfPurchaseTimestamps(events): number[] {
+  getListOfPurchaseTimestamps(events: Event[]): number[] {
     const purchaseTimestamps = [];
     for (const event of events) {
       if (event.marketplace_event_type === MarketplaceEventType.LIST_BUY) {
@@ -116,7 +117,7 @@ export class ObjktsService {
    * @param events - An array of token events.
    * @returns {boolean} The availability of token.
    */
-  checkAvailability(events): boolean {
+  checkAvailability(events: Event[]): boolean {
     const listEdition = this.amountOfListEdition(events);
     const soldEdition = this.amountOfPurchases(events);
     if (listEdition > this.minimumListToken) {
@@ -136,19 +137,19 @@ export class ObjktsService {
    * @param events - An array of token events.
    * @returns {number} The amount of editions which listed.
    */
-  amountOfListEdition(events): number {
+  amountOfListEdition(events: Event[]): number {
     let amountOfList = 0;
     const artist = this.findArtist(events);
     for (const event of events) {
       if (
         event.marketplace_event_type === MarketplaceEventType.LIST_CREATE &&
-        artist === event.creator_address
+        artist.address === event.creator.address
       ) {
         amountOfList += event.amount;
       }
       if (
         event.marketplace_event_type === MarketplaceEventType.LIST_CANCEL &&
-        artist === event.creator_address
+        artist.address === event.creator.address
       ) {
         amountOfList -= event.amount;
       }
@@ -161,7 +162,7 @@ export class ObjktsService {
    * @param events - An array of token events.
    * @returns {number} The amount of editions which has been sold.
    */
-  amountOfPurchases(events): number {
+  amountOfPurchases(events: Event[]): number {
     let amount = 0;
     for (const event of events) {
       if (event.marketplace_event_type === MarketplaceEventType.LIST_BUY) {
@@ -176,11 +177,11 @@ export class ObjktsService {
    * @param events - An array of token events.
    * @returns {number} The amount of editions which has been transferred.
    */
-  amountOfTransfers(events): number {
+  amountOfTransfers(events: Event[]): number {
     let iterator = 0;
     for (const event of events) {
       if (event.event_type === EventType.TRANSFER) {
-        if (event.creator_address === this.findArtist(events)) {
+        if (event.creator.address === this.findArtist(events).address) {
           iterator++;
         }
       }
@@ -193,13 +194,22 @@ export class ObjktsService {
    * @param events - An array of token events.
    * @returns {string} The address of creator of the token.
    */
-  findArtist(events): string {
-    let artist = '';
-    for (const event of events) {
-      if (event.marketplace_event_type === MarketplaceEventType.LIST_CREATE) {
-        artist = event.creator_address;
-        return artist;
-      }
+  findArtist(events: Event[]): Creator {
+    const firstEvent = events[0];
+    let twitterUsername = null;
+    if (firstEvent.creator.twitter) {
+      twitterUsername = firstEvent.creator.twitter.split('/')[-1];
+    }
+
+    return {
+      address: firstEvent.creator.address,
+      profile_address: `https://objkt.com/profile/${firstEvent.creator.address}`,
+      alias: firstEvent.creator.alias,
+      twitter: twitterUsername,
+      email: firstEvent.creator.email,
+      facebook: firstEvent.creator.facebook,
+      instagram: firstEvent.creator.instagram,
+      tzdomain: firstEvent.creator.tzdomain
     }
   }
 
@@ -208,7 +218,7 @@ export class ObjktsService {
    * @param events - An array of token events.
    * @returns {number} The average time (in seconds) between purchases.
    */
-  averagePurchaseActionsTime(events): number {
+  averagePurchaseActionsTime(events: Event[]): number {
     const purchaseTimestamps = this.getListOfPurchaseTimestamps(events);
     const differences = purchaseTimestamps
       .slice(1)
@@ -224,7 +234,7 @@ export class ObjktsService {
    * @param events - An array of token events.
    * @returns {number} The sold rate (as a decimal) for the given list of token events.
    */
-  soldRate(events) {
+  soldRate(events: Event[]) {
     const listEdition = this.amountOfListEdition(events);
     const purchase = this.amountOfPurchases(events);
     return purchase / listEdition;

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
-import { MarketplaceEventType, SortDirection } from './models/objkt.model';
+import { MarketplaceEventType, SortDirection, Event } from './models/token.model';
 import { firstValueFrom, map } from 'rxjs';
 
 @Injectable()
@@ -25,7 +25,7 @@ export class ObjktsApiService {
     }`;
 
     const variables = {
-      limit: 30,
+      limit: 59,
       order_by: [
         { id: SortDirection.DESCENDING },
         { timestamp: SortDirection.DESCENDING },
@@ -54,17 +54,37 @@ export class ObjktsApiService {
               where: $where
               order_by: $order_by
             ) {
-            event_type
-            creator_address
-            marketplace_event_type
             amount
+            creator {
+              address
+              alias
+              email
+              facebook
+              instagram
+              twitter
+              tzdomain
+            }
+            event_type
             fa_contract
-            id
+            marketplace {
+              name
+              contract
+              group
+              subgroup
+            }
+            marketplace_contract
+            marketplace_event_type
             price
             recipient_address
             timestamp
             token {
               name
+              mime
+              pk
+              average
+              lowest_ask
+              highest_offer
+              supply
               token_id
               royalties {
                 amount
