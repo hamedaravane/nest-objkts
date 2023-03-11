@@ -192,20 +192,16 @@ export class ObjktsService {
   /**
    * This function find the address of creator of the token.
    * @param events - An array of token events.
-   * @returns {string} The address of creator of the token.
+   * @returns {Creator} The details of creator of the token.
    */
   findArtist(events: Event[]): Creator {
     const firstEvent = events[0];
-    let twitterUsername = null;
-    if (firstEvent.creator.twitter) {
-      twitterUsername = firstEvent.creator.twitter.split('/')[-1];
-    }
 
     return {
       address: firstEvent.creator.address,
       profile_address: `https://objkt.com/profile/${firstEvent.creator.address}`,
       alias: firstEvent.creator.alias,
-      twitter: twitterUsername,
+      twitter: firstEvent.creator.twitter,
       email: firstEvent.creator.email,
       facebook: firstEvent.creator.facebook,
       instagram: firstEvent.creator.instagram,
