@@ -2,7 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Objkt } from './entities/objkt.entity';
 import { Repository } from 'typeorm';
-import { EventType, MarketplaceEventType, Event, Royalty, Creator } from "./models/token.model";
+import {
+  Creator,
+  Event,
+  EventType,
+  MarketplaceEventType,
+} from './models/token.model';
 import { ObjktsApiService } from './objkts-api.service';
 
 @Injectable()
@@ -27,7 +32,9 @@ export class ObjktsService {
     let tokenDetail = {};
 
     for (const token of tokens) {
-      const tokenEvents: Event[] = await this.objktApiService.getTokenEvents(token);
+      const tokenEvents: Event[] = await this.objktApiService.getTokenEvents(
+        token,
+      );
       if (this.checkIfIBought(tokenEvents)) {
         if (this.checkAvailability(tokenEvents)) {
           tokenDetail = {
@@ -38,7 +45,8 @@ export class ObjktsService {
             sold_editions: this.amountOfPurchases(tokenEvents),
             token_pk: token,
             sold_rate: this.soldRate(tokenEvents),
-            average_collect_actions: this.averagePurchaseActionsTime(tokenEvents),
+            average_collect_actions:
+              this.averagePurchaseActionsTime(tokenEvents),
           };
           tokensArray.push(tokenDetail);
         }
@@ -78,20 +86,19 @@ export class ObjktsService {
   }
 
   /**
-   * This function gets An array of token events. and returns royalty percentage which goes to artist.
-   * @param events - An array of token events.
-   * @returns {number} The royalty percentage.
+   * Calculates the total royalty percentage that should be paid to the artist based on an array of token events.
+   * @param events An array of token events.
+   * @returns The total royalty percentage as a number.
    */
   calculateRoyalty(events: Event[]): number {
-    let amount = 0;
-    let decimal = 0;
-    const royalties: Royalty[] = events[0].token.royalties;
-    for (const royalty of royalties) {
-      amount += royalty.amount;
-      decimal = royalty.decimals;
-    }
-    amount = (amount / Math.pow(10, decimal)) * 100;
-    return amount;
+    const totalRoyaltyAmount = events[0]?.token?.royalties?.reduce(
+      (total, royalty) => {
+        const royaltyAmount = royalty.amount / 10 ** royalty.decimals;
+        return total + royaltyAmount;
+      },
+      0,
+    );
+    return totalRoyaltyAmount * 100;
   }
 
   /**
@@ -205,8 +212,8 @@ export class ObjktsService {
       email: firstEvent.creator.email,
       facebook: firstEvent.creator.facebook,
       instagram: firstEvent.creator.instagram,
-      tzdomain: firstEvent.creator.tzdomain
-    }
+      tzdomain: firstEvent.creator.tzdomain,
+    };
   }
 
   /**
